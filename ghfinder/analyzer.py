@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import re
 from datetime import datetime, timezone
 
@@ -9,6 +10,50 @@ import requests
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from .utils import gh_get
+
+
+def _extract_excerpt(text: str, max_chars: int = 600) -> str:
+    """Extract a clean, meaningful excerpt from raw README Markdown."""
+    lines = text.splitlines()
+    clean: list[str] = []
+
+    for line in lines:
+        # Skip badge lines
+        if "![" in line or "[![" in line:
+            continue
+        # Skip pure HTML tags lines
+        if re.match(r"^\s*<[^>]+>\s*$", line):
+            continue
+        # Skip horizontal rules
+        if re.match(r"^\s*[-=]{3,}\s*$", line):
+            continue
+        # Strip inline HTML
+        line = re.sub(r"<[^>]+>", "", line)
+        # Strip Markdown links but keep text: [text](url) → text
+        line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+        # Strip bold/italic markers
+        line = re.sub(r"[*_]{1,3}([^*_]+)[*_]{1,3}", r"\1", line)
+        # Strip heading hashes but keep text
+        line = re.sub(r"^#{1,6}\s*", "", line)
+        clean.append(line)
+
+    # Join, collapse multiple blank lines, strip leading/trailing blanks
+    text = "\n".join(clean)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    if len(text) <= max_chars:
+        return text
+
+    # Truncate at last sentence boundary before max_chars
+    truncated = text[:max_chars]
+    last_period = max(truncated.rfind(". "), truncated.rfind(".\n"))
+    if last_period > max_chars // 2:
+        return truncated[: last_period + 1] + "…"
+    # Fallback: truncate at last word
+    last_space = truncated.rfind(" ")
+    if last_space > 0:
+        return truncated[:last_space] + "…"
+    return truncated + "…"
 
 
 def _now() -> datetime:
@@ -82,14 +127,17 @@ class RepoAnalyzer:
             result[name] = resp.status_code == 200
         return result
 
-    def check_readme(self, owner: str, repo: str) -> bool:
-        """Check if README exists."""
-        resp = gh_get(self.session, f"/repos/{owner}/{repo}/contents/README.md")
-        if resp.status_code == 200:
-            return True
-        # Try uppercase variants
-        resp2 = gh_get(self.session, f"/repos/{owner}/{repo}/readme")
-        return resp2.status_code == 200
+    def get_readme_content(self, owner: str, repo: str) -> str:
+        """Fetch and decode README content. Returns empty string if not found."""
+        resp = gh_get(self.session, f"/repos/{owner}/{repo}/readme")
+        if resp.status_code != 200:
+            return ""
+        try:
+            data = resp.json()
+            encoded = data.get("content", "")
+            return base64.b64decode(encoded).decode("utf-8", errors="replace")
+        except Exception:
+            return ""
 
     def analyze_repo(self, repo_data: dict, deep: bool = True) -> dict:
         """Enrich raw repo dict with additional API data."""
@@ -100,12 +148,15 @@ class RepoAnalyzer:
         contributor_count = -1
         ci = {"github_actions": False, "travis": False, "circleci": False, "jenkins": False}
         has_readme = False
+        readme_excerpt = ""
 
         if deep:
             languages = self.get_languages(owner, name)
             contributor_count = self.get_contributor_count(owner, name)
             ci = self.check_ci_presence(owner, name)
-            has_readme = self.check_readme(owner, name)
+            readme_raw = self.get_readme_content(owner, name)
+            has_readme = bool(readme_raw)
+            readme_excerpt = _extract_excerpt(readme_raw) if readme_raw else ""
 
         license_info = repo_data.get("license")
         license_name = license_info.get("spdx_id") if license_info else "None"
@@ -138,6 +189,7 @@ class RepoAnalyzer:
             "languages": languages,
             "contributor_count": contributor_count,
             "ci": ci,
+            "readme_excerpt": readme_excerpt,
         }
 
     def analyze_batch(

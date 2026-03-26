@@ -104,41 +104,41 @@ def print_results_table(analyses: list[dict]) -> None:
         expand=True,
     )
     table.add_column("#", style="dim", width=3, no_wrap=True)
-    table.add_column("Repository", min_width=25)
-    table.add_column("Stars", justify="right", style="yellow", width=7)
-    table.add_column("Forks", justify="right", width=6)
-    table.add_column("Language", width=14)
-    table.add_column("License", width=12)
+    table.add_column("Repository", min_width=22, no_wrap=True)
+    table.add_column("Description", min_width=30)
+    table.add_column("Stars", justify="right", style="yellow", width=8)
+    table.add_column("Language", width=13)
+    table.add_column("License", width=11)
     table.add_column("Last Push", width=10)
-    table.add_column("CI/CD", width=18)
-    table.add_column("Contrib.", justify="right", width=8)
 
     for i, a in enumerate(analyses, 1):
         lang = a.get("language", "—")
         lang_text = Text(lang, style=_lang_color(lang))
 
-        repo_text = Text()
-        repo_text.append(a["full_name"], style=f"link {a['url']}")
-
-        contrib = str(a.get("contributor_count", "?")) if a.get("contributor_count", -1) >= 0 else "?"
-
-        # Archived/fork indicators
         flags = ""
         if a.get("is_archived"):
             flags += " [dim][archived][/dim]"
         if a.get("is_fork"):
             flags += " [dim][fork][/dim]"
 
+        # Best available short description
+        desc = a.get("description") or ""
+        if not desc:
+            excerpt = a.get("readme_excerpt", "") or ""
+            desc = excerpt[:120].split("\n")[0]
+        if len(desc) > 80:
+            desc = desc[:77] + "…"
+        if not desc:
+            desc = "[dim]—[/dim]"
+
         table.add_row(
             str(i),
             f"[link={a['url']}]{a['full_name']}[/link]{flags}",
+            desc,
             f"⭐ {a.get('stars', 0):,}",
-            f"{a.get('forks', 0):,}",
             lang_text,
             a.get("license", "None"),
             _relative_date(a.get("days_since_push", -1)),
-            _ci_badges(a.get("ci", {})),
-            contrib,
         )
 
     console.print(table)
@@ -211,10 +211,15 @@ def print_repo_detail(a: dict) -> None:
     # README & license
     meta = f"License: [cyan]{a.get('license', 'None')}[/cyan]  •  README: {'[green]Yes[/green]' if a.get('has_readme') else '[red]No[/red]'}  •  Size: {a.get('size_kb', 0):,} KB"
 
+    # README excerpt
+    excerpt = a.get("readme_excerpt", "")
+    about_section = f"\n[bold]About (README)[/bold]\n[dim]{excerpt}[/dim]\n" if excerpt else ""
+
     body = (
         f"{desc}\n\n"
         f"[link={a['url']}]{a['url']}[/link]\n\n"
-        f"{meta}\n\n"
+        f"{meta}"
+        f"{about_section}\n"
         f"[bold]Languages[/bold]\n{lang_bar}\n\n"
         f"[bold]Activity[/bold]\n{activity}\n\n"
         f"[bold]CI/CD[/bold]  {ci_text}\n\n"

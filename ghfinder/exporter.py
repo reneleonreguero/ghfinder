@@ -113,10 +113,14 @@ class DataExporter:
             contrib = a.get("contributor_count", -1)
             contrib_str = str(contrib) if contrib >= 0 else "?"
 
+            excerpt = a.get("readme_excerpt", "")
+            about_block = ["> " + line if line else ">" for line in excerpt.splitlines()] if excerpt else []
+
             lines += [
                 f"### [{a['full_name']}]({a['url']})",
                 "",
                 f"{a.get('description') or '_No description_'}",
+                *( [""] + about_block + [""] if about_block else [] ),
                 "",
                 f"- **Stars:** {a.get('stars', 0):,}  **Forks:** {a.get('forks', 0):,}  "
                 f"**Watchers:** {a.get('watchers', 0):,}  **Open Issues:** {a.get('open_issues', 0):,}",
